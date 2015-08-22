@@ -159,7 +159,7 @@ The error rates listed above with both of our final models for the cross validat
 # Predictions from Model A
 testingPred <- predict(fitA, testSet)
 testingPred
-# Predictions from Model A
+# Predictions from Model B
 testingPred <- predict(fitB, testSet)
 testingPred
 
