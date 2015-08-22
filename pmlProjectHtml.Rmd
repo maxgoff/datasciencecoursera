@@ -1,0 +1,172 @@
+---
+title: "Practical Machine Learning Project"
+author: "Max K. Goff"
+date: "August 21, 2015"
+output: html_document
+---
+#Summary
+
+This study compares machine learning approaches to evaluate and predict pysical exercise outcome based on proper weight lifting technques.  Our expectation, based on the information provided on the web site, is that an effective predictive model can be built; our goal is to produce a model that will yield results with an error rate less than 1.0%.
+
+The [web site](http://groupware.les.inf.puc-rio.br/har), referenced below, provides details of a study of six participants performing dumbell lifting exercises.  The quality of executing an activity, the "how (well)" it was performed, was measured using sensors on wearable devices and exercise equipment. 
+
+Read more: http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201#ixzz3jY4OxP33The data was captured and evaluationed, with execution clustered in five categories. The categories described in the study are:
+
+Category |  Value
+-------- |  ------------------------------
+A | exactly according to the specification
+B | throwing the elbows to the front
+C | lifting the dumbbell only halfway
+D | lowering the dumbbell only halfway 
+E | throwing the hips to the front 
+
+Only category A corresponds to the correct execution of each exercise.  The other categories capture exercise technique errors.
+
+#Background
+
+Taken from the [assignment listing](https://class.coursera.org/predmachlearn-031/human_grading/view/courses/975200/assessments/4/submissions):  Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+#Data
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+
+```{r}
+options(warn=-1)
+# Clean the Environment
+rm(list = ls(all = TRUE))
+#Setting the working directory - This is specific to your system
+setwd('~/Dropbox/Coursera/MachineLearning')
+# Load the classification and regression training library
+library(caret)
+```
+
+The function below was taken from the project assignment page, and will be used to create the files for the submission portion of the assignment.
+
+```{r}
+# Function from the assignment to write files for submission
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("submit/problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+```
+
+# Processing the Data
+
+In this section the data is read and processed.  Based on empty fields (NA) and sparsely populated categories, the number of dimensions is reduced significantly.
+
+```{r}
+# Read the training and testing sets
+training <- read.csv(file="pml-training.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+testing <- read.csv(file="pml-testing.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+
+training$classe <- as.factor(training$classe)
+
+#Removing NAs and columns not needed
+NAidx <- colnames(training)
+NAidx <- colnames(training[colSums(is.na(training)) == 0])
+NAidx <- NAidx[-c(1:7)]
+NAidx <- apply(training,2,function(x) {sum(is.na(x))}) 
+training <- training[,which(NAidx == 0)]
+NAidx <- apply(testing,2,function(x) {sum(is.na(x))}) 
+testing <- testing[,which(NAidx == 0)]
+
+#Preprocess
+vec <- which(lapply(training[,], class) %in% "numeric")
+# Pre-processing to include 5 nearest neighbors, centered and scaled
+preObj <-preProcess(training[,vec],method=c('knnImpute', 'center', 'scale'))
+trainSet <- predict(preObj, training[,vec])
+trainSet$classe <- training$classe
+testSet <-predict(preObj,testing[,vec])
+
+# remove near zero values, if any
+nearZ <- nearZeroVar(trainSet,saveMetrics=TRUE)
+trainSet <- trainSet[,nearZ$nzv==FALSE]
+nearZ <- nearZeroVar(testSet,saveMetrics=TRUE)
+testSet <- testSet[,nearZ$nzv==FALSE]
+```
+# Prepare for Cross Validation
+
+Cross validation will help estimate the accuracy of the prediction model. We need to partition the data to prepare for cross validation, which will follow our model building and test predictions.
+
+```{r}
+# Create cross validation set
+set.seed(33833)
+
+inTrain = createDataPartition(trainSet$classe, p = 0.8, list=FALSE)
+training = trainSet[inTrain,]
+crossValidation = trainSet[-inTrain,]
+```
+
+# Building the Models
+
+Using the random forest approach (Model A) and generalized linear regression model (Model B), create the models and perform a rudimentary principal components analysis on each.
+
+```{r}
+# Train with random forest and trainControl using 5 fold cross validation.
+ctrl <- trainControl(method='cv', number=5 )
+fitA <- train(classe ~., method="rf", data=training, trControl=ctrl)
+# Train with general linear regression model
+fitB <- train(classe ~., model="glm", data=training, preProcess=c("center", "scale"))
+# Note compare the estimated of error rate and PCA from the models
+
+# Model A
+fitA$finalModel
+varImp(fitA)
+# Model B
+fitB$finalModel
+varImp(fitB)
+
+```
+
+# Predictions and Errors
+
+And now we predict and examine the errors to compare our models.
+
+```{r}
+# Training set accuracy - Model A
+trainingPred <- predict(fitA, training)
+confusionMatrix(trainingPred, training$classe)
+# Training set accuracy - Model B
+trainingPred <- predict(fitB, training)
+confusionMatrix(trainingPred, training$classe)
+
+# Cross validation set accuracy - Model A
+cvPred <- predict(fitA, crossValidation)
+confusionMatrix(cvPred, crossValidation$classe)
+# Cross validation set accuracy - Model B
+cvPred <- predict(fitB, crossValidation)
+confusionMatrix(cvPred, crossValidation$classe)
+```
+
+# Results and Submission
+
+The error rates listed above with both of our final models for the cross validation data is below the 1.0% goal stated earlier.  Thus, the test data is used to predict the categories for each and the results files created for submission.
+
+```{r}
+#Predictions on the real testing set
+# Predictions from Model A
+testingPred <- predict(fitA, testSet)
+testingPred
+# Predictions from Model A
+testingPred <- predict(fitB, testSet)
+testingPred
+
+system("mkdir submit")
+pml_write_files(testingPred)
+```
+
+# Conclusion
+
+Both of he models built to predict exercise form from movement data have an error rate of less than 1.0%, which was the goal stated intially. The predicted results are indentical for both Model A and Model B.  
